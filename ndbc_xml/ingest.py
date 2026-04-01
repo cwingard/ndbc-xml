@@ -7,6 +7,8 @@ Each JSON file produced by the OOI system contains arrays of values
 keyed by variable name. Files are sorted by name before concatenation
 so that time ordering is preserved.
 """
+from __future__ import annotations
+
 import json
 import logging
 from pathlib import Path

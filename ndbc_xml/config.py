@@ -8,7 +8,7 @@ defines the global range checks applied identically to all stations.
 """
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Dict, Tuple
 
 @dataclass
 class StationConfig:
@@ -53,7 +53,7 @@ class StationConfig:
 # ---------------------------------------------------------------------------
 # QC range bounds — (min_valid, max_valid); values outside → NaN → -9999
 # ---------------------------------------------------------------------------
-QC_BOUNDS: dict[str, Tuple[float, float]] = {
+QC_BOUNDS: Dict[str, Tuple[float, float]] = {
     "wind_dir":    (0.0,   360.0),
     "wind_speed":  (0.0,    60.0),
     "baro":        (860.0, 1050.0),
@@ -73,9 +73,9 @@ QC_BOUNDS: dict[str, Tuple[float, float]] = {
 # ---------------------------------------------------------------------------
 # Site metadata: NDBC ID and mooring coordinates
 # ---------------------------------------------------------------------------
-SITES: dict[str, dict] = {
-    "CE02": {"mooring": "ce02shsm", "ndbc_id": "46097", "latitude": 44.639, "longitude": -124.095},
-    "CE04": {"mooring": "ce04ossm", "ndbc_id": "46098", "latitude": 44.369, "longitude": -124.954},
-    "CE07": {"mooring": "ce07shsm", "ndbc_id": "46099", "latitude": 44.369, "longitude": -124.555},
-    "CE09": {"mooring": "ce09ossm", "ndbc_id": "46100", "latitude": 46.859, "longitude": -124.973},
+SITES: Dict[str, dict] = {
+    "CE02": {"mooring": "ce02shsm", "ndbc_id": "46097", "latitude": 44.639, "longitude": -124.304},
+    "CE04": {"mooring": "ce04ossm", "ndbc_id": "46098", "latitude": 44.381, "longitude": -124.956},
+    "CE07": {"mooring": "ce07shsm", "ndbc_id": "46099", "latitude": 46.986, "longitude": -124.566},
+    "CE09": {"mooring": "ce09ossm", "ndbc_id": "46100", "latitude": 46.851, "longitude": -124.972},
 }
