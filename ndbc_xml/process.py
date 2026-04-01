@@ -269,7 +269,7 @@ def bin_observations(
     wavss: pd.DataFrame,
     bin_edges: pd.DatetimeIndex,
     alpha_deg: float,
-    sensor_depth_m: float = 1.25,
+    pressure_dbar: float = 1.25,
 ) -> pd.DataFrame:
     """Bin and process METBK and WAVSS data into 10-minute averages.
 
@@ -296,9 +296,9 @@ def bin_observations(
         are the bin labels used to reindex the result.
     alpha_deg : float
         Buoy heading correction angle in degrees.
-    sensor_depth_m : float
-        CTD sensor depth in metres, used as the pressure argument
-        (dbar ≈ m near the surface) for GSW salinity. Default 1.25.
+    pressure_dbar : float
+        Sea pressure in dbar for GSW salinity calculation. Computed from
+        sensor depth via ``gsw.p_from_z`` in the pipeline. Default 1.25.
 
     Returns
     -------
@@ -323,7 +323,7 @@ def bin_observations(
     salinity = calc_salinity(
         metbk["sea_surface_conductivity"].values,
         metbk["sea_surface_temperature"].values,
-        pressure_dbar=sensor_depth_m,
+        pressure_dbar=pressure_dbar,
     )
     rain = calc_rain_rate(metbk["precipitation_level"].values)
 

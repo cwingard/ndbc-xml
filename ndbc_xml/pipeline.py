@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import gsw
 import pandas as pd
 
 from .config import StationConfig
@@ -28,9 +29,6 @@ from .xml_writer import write_xml, write_xml_daily, xml_filename
 
 log = logging.getLogger(__name__)
 
-# Subtract ~1 h from the last raw timestamp to avoid partially-filled bins
-# (matches the original MATLAB comment about data arriving at :05)
-_BIN_END_MARGIN = pd.Timedelta(hours=1)
 
 # Spans longer than this are written as one file per UTC day instead of a
 # single file.  Reprocessing a full deployment produces months of data, so
@@ -82,8 +80,12 @@ def run_station(config: StationConfig) -> list[Path] | None:
     # --- 2. Bin start ---
     bin_start = bin_start_from_state(config.state_file, earliest)
 
-    # --- 3. Bin end (last 10-min boundary safely within data) ---
-    bin_end = (latest - _BIN_END_MARGIN).floor("10min")
+    # --- 3. Bin end ---
+    # Floor latest to the hour (matching the original MATLAB: subtract 1 h
+    # then truncate to the hour, then set minutes to :55).  With the +5 min
+    # METBK timestamp shift and bins aligned to :00 boundaries, flooring
+    # to the hour gives a last xml timestamp at (latest_hour - 1):50.
+    bin_end = latest.floor("h")
 
     if bin_end <= bin_start:
         log.info(
@@ -104,13 +106,16 @@ def run_station(config: StationConfig) -> list[Path] | None:
     log.info("%s: IGRF declination = %.3f", config.site, alpha_deg)
 
     # --- 5. Bin, QC ---
+    # Convert sensor depth to pressure: GSW uses z (negative-down), so
+    # depth_m positive → z = -depth_m.
+    pressure_dbar = float(gsw.p_from_z(-config.sensor_depth_m, config.latitude))
     edges = make_bin_edges(bin_start, bin_end)
     binned = bin_observations(
         metbk=metbk,
         wavss=wavss,
         bin_edges=edges,
         alpha_deg=alpha_deg,
-        sensor_depth_m=config.sensor_depth_m,
+        pressure_dbar=pressure_dbar,
     )
     qc_data = apply_qc(binned)
 
