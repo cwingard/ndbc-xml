@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Compute magnetic declination using the IGRF-14 model via ppigrf.
 
@@ -37,16 +39,16 @@ def get_declination(
 
     Parameters
     ----------
-    latitude : float
+    latitude : float, array_like
         Geodetic latitude in decimal degrees north.
-    longitude : float
+    longitude : float, array_like
         Geodetic longitude in decimal degrees east (negative west).
-    date : datetime
+    date : datetime, array_like
         Date for which to compute declination. A mid-deployment date
         is appropriate for a multi-month record; declination changes
         at roughly 0.1 deg/yr at Oregon coast locations.
-    altitude_km : float
-        Height above the WGS-84 ellipsoid in kilometres.
+    altitude_km : float, array_like
+        Height above the WGS-84 ellipsoid in kilometers.
         Default 0.0 (sea level).
 
     Returns
@@ -60,7 +62,7 @@ def get_declination(
     >>> get_declination(44.639, -124.095, datetime(2026, 1, 1))
     14.602...
     """
-    Be, Bn, _ = ppigrf.igrf(longitude, latitude, altitude_km, date)
+    be, bn, _ = ppigrf.igrf(longitude, latitude, altitude_km, date)  # type: ignore[arg-type]
     # arctan2(east, north) gives the signed angle of the magnetic
     # field vector from geographic north — i.e. the declination.
-    return float(np.degrees(np.arctan2(Be.squeeze(), Bn.squeeze())))
+    return float(np.degrees(np.arctan2(be.squeeze(), bn.squeeze())))

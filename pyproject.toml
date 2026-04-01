@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ndbc-xml"
+version = "0.1.0"
+description = "Generate NDBC XML submission files from OOI buoy data"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.0",
+    "gsw>=3.6",
+    "ppigrf>=2.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+ndbc-xml = "ndbc_xml.ndbc:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ndbc_xml*"]
+
+[tool.pytest.ini_options]
+testpaths = ["ndbc_xml/tests"]

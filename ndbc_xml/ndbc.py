@@ -1,13 +1,15 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Command-line entry point for the NDBC XML generation pipeline.
 
-Intended to be invoked from a crontab entry, one line per mooring::
+Intended to be invoked from a crontab entry, one line per mooring:
 
     # /etc/cron.d/ndbc_xml  — runs hourly
-    0 * * * * python -m ndbc_xml.main CE02 /home/ooiuser/data/parsed/ce02shsm/D00020
-    0 * * * * python -m ndbc_xml.main CE04 /home/ooiuser/data/parsed/ce04ossm/D00019
-    0 * * * * python -m ndbc_xml.main CE07 /home/ooiuser/data/parsed/ce07shsm/D00020
-    0 * * * * python -m ndbc_xml.main CE09 /home/ooiuser/data/parsed/ce09ossm/D00020
+    0 * * * * python -m ndbc_xml.ndbc CE02 /home/ooiuser/data/parsed/ce02shsm/D00020
+    0 * * * * python -m ndbc_xml.ndbc CE04 /home/ooiuser/data/parsed/ce04ossm/D00019
+    0 * * * * python -m ndbc_xml.ndbc CE07 /home/ooiuser/data/parsed/ce07shsm/D00020
+    0 * * * * python -m ndbc_xml.ndbc CE09 /home/ooiuser/data/parsed/ce09ossm/D00020
 
 A new deployment is signaled implicitly by passing a new
 DEPLOYMENT_DIR (e.g. ``D00021`` instead of ``D00020``). No state file
@@ -52,7 +54,6 @@ Optional arguments
     Append log output to this file in addition to stderr.
     Useful for cron jobs where stdout is discarded.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -64,39 +65,6 @@ from pathlib import Path
 from .config import StationConfig, SITES
 from .pipeline import run_station
 from .state import clear_state
-
-def _build_config(args: argparse.Namespace) -> StationConfig:
-    """Construct a :class:`StationConfig` from parsed CLI arguments.
-
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Parsed arguments from :func:`_parse_args`.
-
-    Returns
-    -------
-    StationConfig
-        Fully populated configuration ready for :func:`run_station`.
-    """
-    site = args.site.upper()
-    meta = SITES[site]
-    deploy = Path(args.deployment_dir)
-
-    return StationConfig(
-        site=site,
-        ndbc_id=meta["ndbc_id"],
-        latitude=meta["latitude"],
-        longitude=meta["longitude"],
-        metbk_dir=deploy / "buoy" / "metbk",
-        wavss_dir=deploy / "buoy" / "wavss",
-        xml_out_dir=Path(args.xml_out) if args.xml_out else deploy / "buoy" / "metbk" / "xml",
-        state_file=(
-            Path(args.state_file)
-            if args.state_file
-            else deploy / "buoy" / "metbk" / "xml" / f"{site}_position.json"
-        ),
-        sensor_depth_m=args.sensor_depth,
-    )
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -112,7 +80,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     argparse.Namespace
     """
     parser = argparse.ArgumentParser(
-        prog="python -m ndbc_xml.main",
+        prog="python -m ndbc_xml.ndbc",
         description=(
             "Generate NDBC XML submission files from OOI buoy JSON data."
         ),
@@ -219,8 +187,109 @@ def _configure_logging(level: str, log_file: str | None) -> None:
     )
 
 
+def _build_config(args: argparse.Namespace) -> StationConfig:
+    """Construct a :class:`StationConfig` from parsed CLI arguments.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed arguments from :func:`_parse_args`.
+
+    Returns
+    -------
+    StationConfig
+        Fully populated configuration ready for :func:`ndbc`.
+    """
+    site = args.site.upper()
+    meta = SITES[site]
+    deploy = Path(args.deployment_dir)
+
+    return StationConfig(
+        site=site,
+        ndbc_id=meta["ndbc_id"],
+        latitude=meta["latitude"],
+        longitude=meta["longitude"],
+        metbk_dir=deploy / "buoy" / "metbk",
+        wavss_dir=deploy / "buoy" / "wavss",
+        xml_out_dir=Path(args.xml_out) if args.xml_out else deploy / "buoy" / "metbk" / "xml",
+        state_file=(
+            Path(args.state_file)
+            if args.state_file
+            else deploy / "buoy" / "metbk" / "xml" / f"{site}_position.json"
+        ),
+        sensor_depth_m=args.sensor_depth,
+    )
+
+
+def ndbc(
+    config: StationConfig,
+    alpha_date: datetime | None = None,
+    reprocess: bool = False,
+) -> str | None:
+    """Run the NDBC XML pipeline for a single station.
+
+    Parameters
+    ----------
+    config : StationConfig
+        Fully populated station configuration.
+    alpha_date : datetime or None
+        If provided, fix the IGRF magnetic-declination calculation to this
+        date instead of using the mid-point of the processing window.
+    reprocess : bool
+        If ``True``, delete the state file before running so that the
+        pipeline reprocesses all available data from scratch.
+
+    Returns
+    -------
+    str or None
+        Path to the XML file written, or ``None`` if there was no new data.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a required data directory does not exist.
+    Exception
+        Re-raises any unexpected pipeline error.
+    """
+    log = logging.getLogger(__name__)
+
+    if reprocess:
+        clear_state(config.state_file)
+
+    log.info("Site:           %s (NDBC %s)", config.site, config.ndbc_id)
+    log.info("METBK dir:      %s", config.metbk_dir)
+    log.info("WAVSS dir:      %s", config.wavss_dir)
+    log.info("XML output:     %s", config.xml_out_dir)
+    log.info("State file:     %s", config.state_file)
+    log.info("Reprocess:      %s", reprocess)
+    log.info(
+        "Alpha date:     %s",
+        alpha_date.strftime("%Y-%m-%d") if alpha_date else "mid-deployment (auto)",
+    )
+    log.info("Sensor depth:   %.2f m", config.sensor_depth_m)
+
+    import ndbc_xml.pipeline as _pipeline
+    _original = _pipeline.get_declination
+
+    if alpha_date is not None:
+        from .declination import get_declination as _get_decl
+
+        def _fixed_date_decl(latitude, longitude, date):
+            return _get_decl(latitude, longitude, alpha_date)
+
+        _pipeline.get_declination = _fixed_date_decl
+        log.debug("Declination fixed to alpha_date %s", alpha_date.date())
+
+    try:
+        result = run_station(config)
+    finally:
+        _pipeline.get_declination = _original
+
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the CLI.
+    """CLI entry point.
 
     Parameters
     ----------
@@ -256,52 +325,18 @@ def main(argv: list[str] | None = None) -> int:
         log.error("DEPLOYMENT_DIR does not exist: %s", deploy)
         return 1
 
+    log.info("Deployment dir: %s", deploy)
+
     config = _build_config(args)
 
-    # --reprocess: clear state before running so the pipeline starts fresh
-    if args.reprocess:
-        clear_state(config.state_file)
-
-    # Log the effective configuration so cron output is self-documenting
-    log.info("Site:           %s (NDBC %s)", config.site, config.ndbc_id)
-    log.info("Deployment dir: %s", deploy)
-    log.info("METBK dir:      %s", config.metbk_dir)
-    log.info("WAVSS dir:      %s", config.wavss_dir)
-    log.info("XML output:     %s", config.xml_out_dir)
-    log.info("State file:     %s", config.state_file)
-    log.info("Reprocess:      %s", args.reprocess)
-    log.info(
-        "Alpha date:     %s",
-        alpha_date.strftime("%Y-%m-%d") if alpha_date
-        else "mid-deployment (auto)",
-    )
-    log.info("Sensor depth:   %.2f m", config.sensor_depth_m)
-
-    # If an explicit alpha_date was supplied, fix the date used for
-    # declination by temporarily overriding the pipeline's reference.
-    if alpha_date is not None:
-        import ndbc_xml.pipeline as _pipeline
-        from .declination import get_declination as _get_decl
-
-        _original = _pipeline.get_declination
-
-        def _fixed_date_decl(latitude, longitude, date):
-            return _get_decl(latitude, longitude, alpha_date)
-
-        _pipeline.get_declination = _fixed_date_decl
-        log.debug("Declination fixed to alpha_date %s", alpha_date.date())
-
     try:
-        result = run_station(config)
+        result = ndbc(config, alpha_date=alpha_date, reprocess=args.reprocess)
     except FileNotFoundError as exc:
         log.error("Data directory not found: %s", exc)
         return 1
     except Exception as exc:
         log.exception("Pipeline failed: %s", exc)
         return 1
-    finally:
-        if alpha_date is not None:
-            _pipeline.get_declination = _original
 
     if result is None:
         log.info("No new data to process — exiting.")

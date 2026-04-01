@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 End-to-end pipeline: ingest → process → QC → write XML.
 
@@ -6,16 +8,9 @@ Entry points
 run_station(config)
     Run the full pipeline for a single :class:`~ndbc_xml.config.StationConfig`.
 
-run_all(sites)
-    Run :func:`run_station` for every site in the supplied list (or all
-    configured sites if *sites* is ``None``).
-
 Typical usage::
 
     from ndbc_xml.pipeline import run_station
-    from ndbc_xml.config import STATIONS
-
-    run_station(STATIONS["CE02"])
 """
 
 from __future__ import annotations
@@ -25,11 +20,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import StationConfig, STATIONS
+from .config import StationConfig
 from .declination import get_declination
 from .ingest import load_metbk, load_wavss
 from .process import bin_observations, make_bin_edges, apply_qc
-from .state import determine_bin_start, save_state
+from .state import bin_start_from_state, save_state
 from .xml_writer import write_xml, xml_filename
 
 log = logging.getLogger(__name__)
@@ -79,11 +74,7 @@ def run_station(config: StationConfig) -> Path | None:
     latest = metbk_ts.max()
 
     # --- 2. Bin start ---
-    bin_start = determine_bin_start(
-        state_file=config.state_file,
-        earliest_data_time=earliest,
-        deployment_indicator_file=config.deployment_indicator_file,
-    )
+    bin_start = bin_start_from_state(config.state_file, earliest)
 
     # --- 3. Bin end (last 10-min boundary safely within data) ---
     bin_end = (latest - _BIN_END_MARGIN).floor("10min")
@@ -112,9 +103,7 @@ def run_station(config: StationConfig) -> Path | None:
         metbk=metbk,
         wavss=wavss,
         bin_edges=edges,
-        alpha_deg=alpha_deg,
-        latitude=config.latitude,
-        sensor_depth_m=config.sensor_depth_m,
+        alpha_deg=alpha_deg
     )
     qc_data = apply_qc(binned)
 
@@ -132,34 +121,3 @@ def run_station(config: StationConfig) -> Path | None:
     save_state(config.state_file, last_bin_end=bin_end, station=config.site)
 
     return written
-
-
-def run_all(sites: list[str] | None = None) -> dict[str, Path | None]:
-    """Run the pipeline for multiple stations.
-
-    Parameters
-    ----------
-    sites : list of str or None
-        Site codes to process (e.g. ``['CE02', 'CE04']``).
-        Pass ``None`` to process all sites in
-        :data:`~ndbc_xml.config.STATIONS`.
-
-    Returns
-    -------
-    dict
-        Mapping of site code → output XML path (or ``None`` if no
-        new data were available for that site).
-    """
-    targets = sites if sites is not None else list(STATIONS.keys())
-    results = {}
-    for site in targets:
-        if site not in STATIONS:
-            log.error("Unknown site '%s' — skipping.", site)
-            results[site] = None
-            continue
-        try:
-            results[site] = run_station(STATIONS[site])
-        except Exception:
-            log.exception("Pipeline failed for %s", site)
-            results[site] = None
-    return results

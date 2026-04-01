@@ -1,12 +1,11 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Tests for ndbc_xml processing and XML writing.
 
 Run with:  pytest tests/test_ndbc_xml.py -v
 """
 
-import json
-import math
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -17,12 +16,9 @@ from ndbc_xml.process import (
     wind_speed,
     wind_direction,
     rotate_wave_dir,
-    wave_direction_from_vectors,
     calc_rain_rate,
     bin_mean,
     apply_qc,
-    epoch_to_datetime,
-    make_bin_edges,
 )
 from ndbc_xml.xml_writer import (
     build_message,
@@ -34,8 +30,8 @@ from ndbc_xml.xml_writer import (
 from ndbc_xml.state import (
     load_state,
     save_state,
-    determine_bin_start,
-    _floor_to_10min,
+    clear_state,
+    bin_start_from_state,
 )
 
 
@@ -331,26 +327,34 @@ class TestState:
 
     def test_floor_to_10min(self):
         ts = _ts("2026-03-30T12:07:33+00:00")
-        assert _floor_to_10min(ts) == _ts("2026-03-30T12:00:00+00:00")
+        assert ts.floor("10min") == _ts("2026-03-30T12:00:00+00:00")
 
-    def test_determine_bin_start_fresh_deployment(self, tmp_path):
-        indicator = tmp_path / "indicator.txt"
-        indicator.write_text("   0.0000000e+00\n")
+    def test_bin_start_no_state_uses_earliest(self, tmp_path):
+        """No state file -> start 1 h after earliest data, floored."""
         state = tmp_path / "state.json"
         earliest = _ts("2026-03-01T00:00:00+00:00")
-        result = determine_bin_start(state, earliest, indicator)
-        # Should be ~1 h after earliest, floored to 10 min
+        result = bin_start_from_state(state, earliest)
         assert result == _ts("2026-03-01T01:00:00+00:00")
-        # Indicator should be reset to 1
-        assert float(indicator.read_text().strip()) == 1.0
 
-    def test_determine_bin_start_uses_state(self, tmp_path):
+    def test_bin_start_resumes_from_state(self, tmp_path):
+        """Existing state file -> resume from last_bin_end."""
         state = tmp_path / "state.json"
         last = _ts("2026-03-30T10:00:00+00:00")
         save_state(state, last)
         earliest = _ts("2026-03-01T00:00:00+00:00")
-        result = determine_bin_start(state, earliest)
+        result = bin_start_from_state(state, earliest)
         assert result == last
+
+    def test_clear_state_removes_file(self, tmp_path):
+        state = tmp_path / "state.json"
+        save_state(state, _ts("2026-03-30T10:00:00+00:00"))
+        assert state.exists()
+        clear_state(state)
+        assert not state.exists()
+
+    def test_clear_state_missing_file_ok(self, tmp_path):
+        """clear_state on a non-existent file should not raise."""
+        clear_state(tmp_path / "nonexistent.json")
 
 
 # ---------------------------------------------------------------------------
@@ -398,50 +402,50 @@ class TestGetDeclination:
 
 
 # ---------------------------------------------------------------------------
-# main.py
+# ndbc.py
 # ---------------------------------------------------------------------------
 
 class TestMain:
     """Tests for the CLI argument parsing and config building."""
 
     def test_help_exits_zero(self):
-        from ndbc_xml.main import main
+        from ndbc_xml.ndbc import main
         with pytest.raises(SystemExit) as exc:
             main(["--help"])
         assert exc.value.code == 0
 
     def test_invalid_site_rejected(self, tmp_path):
-        from ndbc_xml.main import main
+        from ndbc_xml.ndbc import main
         with pytest.raises(SystemExit) as exc:
             main(["CEXX", str(tmp_path)])
         assert exc.value.code != 0
 
     def test_missing_deployment_dir(self, tmp_path):
-        from ndbc_xml.main import main
+        from ndbc_xml.ndbc import main
         ret = main(["CE02", str(tmp_path / "nonexistent")])
         assert ret == 1
 
     def test_invalid_alpha_date(self, tmp_path):
-        from ndbc_xml.main import main
+        from ndbc_xml.ndbc import main
         ret = main(["CE02", str(tmp_path), "--alpha-date", "not-a-date"])
         assert ret == 1
 
     def test_build_config_defaults(self, tmp_path):
         """Default xml-out and state-file paths are derived from deployment_dir."""
-        from ndbc_xml.main import _parse_args, _build_config
+        from ndbc_xml.ndbc import _parse_args, _build_config
         # Create minimal required subdirs so validation passes
         (tmp_path / "buoy" / "metbk").mkdir(parents=True)
         (tmp_path / "buoy" / "wavss").mkdir(parents=True)
         args = _parse_args(["CE02", str(tmp_path)])
         config = _build_config(args)
-        assert config.xml_out_dir == tmp_path / "xml"
-        assert config.state_file == tmp_path / "CE02_position.json"
+        assert config.xml_out_dir == tmp_path / "buoy" / "metbk" / "xml"
+        assert config.state_file == tmp_path / "buoy" / "metbk" / "xml" / "CE02_position.json"
         assert config.metbk_dir == tmp_path / "buoy" / "metbk"
         assert config.wavss_dir == tmp_path / "buoy" / "wavss"
 
     def test_build_config_explicit_overrides(self, tmp_path):
         """Explicit --xml-out and --state-file are respected."""
-        from ndbc_xml.main import _parse_args, _build_config
+        from ndbc_xml.ndbc import _parse_args, _build_config
         xml_dir = tmp_path / "myxml"
         state = tmp_path / "mystate.json"
         args = _parse_args([
@@ -455,30 +459,34 @@ class TestMain:
         assert config.state_file == state
         assert config.sensor_depth_m == 2.0
 
-    def test_new_deployment_writes_indicator(self, tmp_path):
-        """--new-deployment creates a zero-valued indicator file."""
-        from ndbc_xml.main import _parse_args, _build_config
-        args = _parse_args(["CE02", str(tmp_path), "--new-deployment"])
-        config = _build_config(args)
-        indicator = config.deployment_indicator_file
-        assert indicator.exists()
-        assert float(indicator.read_text().strip()) == 0.0
+    def test_reprocess_clears_state(self, tmp_path):
+        """--reprocess deletes the state file before running."""
+        from unittest.mock import patch
+        from ndbc_xml.ndbc import main
+        from ndbc_xml.state import save_state
+        import pandas as pd
+        state = tmp_path / "buoy" / "metbk" / "xml" / "CE02_position.json"
+        save_state(state, pd.Timestamp("2026-01-01", tz="UTC"))
+        assert state.exists()
+        with patch("ndbc_xml.ndbc.run_station", return_value=None):
+            main(["CE02", str(tmp_path), "--reprocess"])
+        assert not state.exists()
 
     def test_site_metadata_complete(self):
         """All four sites have metadata entries."""
-        from ndbc_xml.main import _SITE_META
+        from ndbc_xml.config import SITES
         for site in ("CE02", "CE04", "CE07", "CE09"):
-            assert site in _SITE_META
-            assert "ndbc_id" in _SITE_META[site]
-            assert "latitude" in _SITE_META[site]
-            assert "longitude" in _SITE_META[site]
+            assert site in SITES
+            assert "ndbc_id" in SITES[site]
+            assert "latitude" in SITES[site]
+            assert "longitude" in SITES[site]
 
     def test_exit_code_2_no_data(self, tmp_path):
         """Returns exit code 2 when no new data are available."""
         from unittest.mock import patch
-        from ndbc_xml.main import main
+        from ndbc_xml.ndbc import main
         (tmp_path / "buoy" / "metbk").mkdir(parents=True)
         (tmp_path / "buoy" / "wavss").mkdir(parents=True)
-        with patch("ndbc_xml.main.run_station", return_value=None):
+        with patch("ndbc_xml.ndbc.run_station", return_value=None):
             ret = main(["CE02", str(tmp_path)])
         assert ret == 2

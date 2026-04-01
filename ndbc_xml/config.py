@@ -1,18 +1,19 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
 Station configuration for NDBC XML generation.
 
 Each StationConfig holds all site-specific parameters. QC_BOUNDS
 defines the global range checks applied identically to all stations.
 """
-
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
-
+from typing import Tuple
 
 @dataclass
 class StationConfig:
-    """Per-station parameters for NDBC XML generation.
+    """
+    Per-station parameters for NDBC XML generation.
 
     Parameters
     ----------
@@ -36,14 +37,9 @@ class StationConfig:
         JSON file used to persist the last-processed bin timestamp
         across runs. Created automatically on first run.
     sensor_depth_m : float
-        Nominal depth of the CTD/temperature sensor in metres
+        Nominal depth of the CTD/temperature sensor in meters
         (positive down). Used for pressure calculation. Default 1.5 m.
-    deployment_indicator_file : Optional[Path]
-        Text file (single float) flagging whether this is a fresh
-        deployment (0) or a continuation (1). When ``None`` the
-        pipeline always uses state_file for continuity tracking.
     """
-
     site: str
     ndbc_id: str
     latitude: float
@@ -53,13 +49,10 @@ class StationConfig:
     xml_out_dir: Path
     state_file: Path
     sensor_depth_m: float = 1.5
-    deployment_indicator_file: Optional[Path] = None
-
 
 # ---------------------------------------------------------------------------
 # QC range bounds — (min_valid, max_valid); values outside → NaN → -9999
 # ---------------------------------------------------------------------------
-
 QC_BOUNDS: dict[str, Tuple[float, float]] = {
     "wind_dir":    (0.0,   360.0),
     "wind_speed":  (0.0,    60.0),
@@ -78,56 +71,11 @@ QC_BOUNDS: dict[str, Tuple[float, float]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Pre-configured station instances
+# Site metadata: NDBC ID and mooring coordinates
 # ---------------------------------------------------------------------------
-
-_BASE = Path("/mnt/ooinas/data/cgsn/proc")
-_SCRIPTS = Path("/home/craig/cgoms/scripts")
-_XML_BASE = Path("/home/craig/cgoms/xml")
-
-STATIONS: dict[str, StationConfig] = {
-    "CE02": StationConfig(
-        site="CE02",
-        ndbc_id="46097",
-        latitude=44.639,
-        longitude=-124.095,
-        metbk_dir=_BASE / "ce02shsm/D00020/buoy/metbk",
-        wavss_dir=_BASE / "ce02shsm/D00020/buoy/wavss",
-        xml_out_dir=_XML_BASE / "CE02",
-        state_file=_SCRIPTS / "CE02_position.json",
-        deployment_indicator_file=_SCRIPTS / "CE02_deployment_indicator.txt",
-    ),
-    "CE04": StationConfig(
-        site="CE04",
-        ndbc_id="46098",
-        latitude=44.369,
-        longitude=-124.954,
-        metbk_dir=_BASE / "ce04ossm/D00019/buoy/metbk",
-        wavss_dir=_BASE / "ce04ossm/D00019/buoy/wavss",
-        xml_out_dir=_XML_BASE / "CE04",
-        state_file=_SCRIPTS / "CE04_position.json",
-        deployment_indicator_file=_SCRIPTS / "CE04_deployment_indicator.txt",
-    ),
-    "CE07": StationConfig(
-        site="CE07",
-        ndbc_id="46099",
-        latitude=44.369,
-        longitude=-124.555,
-        metbk_dir=_BASE / "ce07shsm/D00020/buoy/metbk",
-        wavss_dir=_BASE / "ce07shsm/D00020/buoy/wavss",
-        xml_out_dir=_XML_BASE / "CE07",
-        state_file=_SCRIPTS / "CE07_position.json",
-        deployment_indicator_file=_SCRIPTS / "CE07_deployment_indicator.txt",
-    ),
-    "CE09": StationConfig(
-        site="CE09",
-        ndbc_id="46100",
-        latitude=46.859,
-        longitude=-124.973,
-        metbk_dir=_BASE / "ce09ossm/D00020/buoy/metbk",
-        wavss_dir=_BASE / "ce09ossm/D00020/buoy/wavss",
-        xml_out_dir=_XML_BASE / "CE09",
-        state_file=_SCRIPTS / "CE09_position.json",
-        deployment_indicator_file=_SCRIPTS / "CE09_deployment_indicator.txt",
-    ),
+SITES: dict[str, dict] = {
+    "CE02": {"mooring": "ce02shsm", "ndbc_id": "46097", "latitude": 44.639, "longitude": -124.095},
+    "CE04": {"mooring": "ce04ossm", "ndbc_id": "46098", "latitude": 44.369, "longitude": -124.954},
+    "CE07": {"mooring": "ce07shsm", "ndbc_id": "46099", "latitude": 44.369, "longitude": -124.555},
+    "CE09": {"mooring": "ce09ossm", "ndbc_id": "46100", "latitude": 46.859, "longitude": -124.973},
 }

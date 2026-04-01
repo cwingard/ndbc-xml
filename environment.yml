@@ -1,0 +1,14 @@
+name: ndbc-xml
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy>=2.0
+  - pandas>=2.0
+  - gsw>=3.6
+  - ppigrf>=2.1
+  - pytest
+  - ruff
+  - pip
+  - pip:
+      - -e .
