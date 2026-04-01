@@ -17,7 +17,8 @@ from ndbc_xml.process import (
     wind_direction,
     rotate_wave_dir,
     calc_rain_rate,
-    bin_mean,
+    make_bin_edges,
+    bin_observations,
     apply_qc,
 )
 from ndbc_xml.xml_writer import (
@@ -120,44 +121,87 @@ class TestCalcRainRate:
         assert np.isnan(calc_rain_rate(precip)[0])
 
 
-class TestBinMean:
-    def _setup(self):
-        edges = pd.date_range("2026-01-01", periods=4,
-                              freq="10min", tz="UTC")
-        return edges
+class TestBinObservations:
+    """Tests for resample-based bin_observations."""
 
-    def test_single_value_per_bin(self):
-        edges = self._setup()
-        ts = pd.DatetimeIndex([
-            "2026-01-01 00:05:00",
-            "2026-01-01 00:15:00",
-            "2026-01-01 00:25:00",
-        ]).tz_localize("UTC")
-        vals = np.array([1.0, 2.0, 3.0])
-        result = bin_mean(vals, ts, edges)
-        np.testing.assert_allclose(result, [1.0, 2.0, 3.0])
+    _t0 = pd.Timestamp("2026-01-01 00:00:00", tz="UTC")
+
+    def _metbk(self, times_s, u=3.0, v=4.0, precip=None):
+        n = len(times_s)
+        if precip is None:
+            precip = np.arange(n, dtype=float)
+        return pd.DataFrame({
+            "time":                    np.array(times_s, dtype=float),
+            "eastward_wind_velocity":  np.full(n, u),
+            "northward_wind_velocity": np.full(n, v),
+            "barometric_pressure":     np.full(n, 1013.0),
+            "air_temperature":         np.full(n, 15.0),
+            "relative_humidity":       np.full(n, 75.0),
+            "shortwave_irradiance":    np.full(n, 200.0),
+            "longwave_irradiance":     np.full(n, 350.0),
+            "sea_surface_temperature": np.full(n, 12.0),
+            "sea_surface_conductivity":np.full(n, 3.5),
+            "precipitation_level":     np.asarray(precip, dtype=float),
+        })
+
+    def _wavss(self, times_s):
+        n = len(times_s)
+        return pd.DataFrame({
+            "time":                    np.array(times_s, dtype=float),
+            "significant_wave_height": np.full(n, 1.5),
+            "maximum_wave_height":     np.full(n, 2.0),
+            "peak_period":             np.full(n, 10.0),
+            "average_wave_period":     np.full(n, 8.0),
+            "mean_wave_direction":     np.full(n, 270.0),
+        })
+
+    def _ts(self, hhmm: str) -> int:
+        return int(pd.Timestamp(f"2026-01-01 {hhmm}", tz="UTC").timestamp())
+
+    def test_output_shape(self):
+        edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=30))
+        times_s = [self._ts("00:05"), self._ts("00:15"), self._ts("00:25")]
+        df = bin_observations(self._metbk(times_s), self._wavss(times_s),
+                              edges, alpha_deg=0.0)
+        assert len(df) == 3
 
     def test_empty_bin_is_nan(self):
-        edges = self._setup()
-        ts = pd.DatetimeIndex([
-            "2026-01-01 00:05:00",
-            "2026-01-01 00:25:00",
-        ]).tz_localize("UTC")
-        vals = np.array([1.0, 3.0])
-        result = bin_mean(vals, ts, edges)
-        assert result[0] == 1.0
-        assert np.isnan(result[1])
-        assert result[2] == 3.0
+        edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=30))
+        # Skip the middle bin (00:10–00:20)
+        times_s = [self._ts("00:05"), self._ts("00:25")]
+        df = bin_observations(self._metbk(times_s), self._wavss(times_s),
+                              edges, alpha_deg=0.0)
+        assert len(df) == 3
+        assert np.isnan(df["wind_speed"].iloc[1])
 
-    def test_nan_values_excluded_from_mean(self):
-        edges = self._setup()
-        ts = pd.DatetimeIndex([
-            "2026-01-01 00:02:00",
-            "2026-01-01 00:07:00",
-        ]).tz_localize("UTC")
-        vals = np.array([np.nan, 4.0])
-        result = bin_mean(vals, ts, edges)
-        assert np.isclose(result[0], 4.0)
+    def test_nan_excluded_from_mean(self):
+        edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=10))
+        times_s = [self._ts("00:02"), self._ts("00:07")]
+        # Two observations in the same bin; second has u=4, v=3 → speed=5
+        # first has u=nan; resample mean should ignore it
+        metbk = self._metbk(times_s)
+        metbk.loc[0, "eastward_wind_velocity"] = np.nan
+        metbk.loc[0, "northward_wind_velocity"] = np.nan
+        df = bin_observations(metbk, self._wavss(times_s), edges, alpha_deg=0.0)
+        # Only the second sample (u=3, v=4) contributes → speed=5
+        np.testing.assert_allclose(df["wind_speed"].iloc[0], 5.0)
+
+    def test_wind_speed_correct(self):
+        """u=3, v=4, alpha=0 → speed=5.0."""
+        edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=10))
+        times_s = [self._ts("00:05")]
+        df = bin_observations(self._metbk(times_s), self._wavss(times_s),
+                              edges, alpha_deg=0.0)
+        np.testing.assert_allclose(df["wind_speed"].iloc[0], 5.0)
+
+    def test_bin_center_timestamps(self):
+        """time column holds bin-center (+5 min) timestamps."""
+        edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=20))
+        times_s = [self._ts("00:05")]
+        df = bin_observations(self._metbk(times_s), self._wavss(times_s),
+                              edges, alpha_deg=0.0)
+        assert df["time"].iloc[0] == pd.Timestamp("2026-01-01 00:05", tz="UTC")
+        assert df["time"].iloc[1] == pd.Timestamp("2026-01-01 00:15", tz="UTC")
 
 
 class TestApplyQC:

@@ -3,21 +3,20 @@
 """
 Scientific processing for NDBC XML generation.
 
-Transforms raw METBK/WAVSS arrays into 10-minute binned, QC checked
+Transforms raw METBK/WAVSS arrays into 10-minute binned, QC-checked
 variables ready for XML output.
 
-Processing steps mirror the original MATLAB pipeline:
+Processing steps:
   1. Rotate wind (u, v) components by buoy heading alpha.
   2. Compute wind speed and meteorological wind direction.
   3. Convert wave direction to unit vectors, rotate by alpha,
      then recover meteorological wave direction.
   4. Compute practical salinity from conductivity via GSW.
   5. Compute rain rate from cumulative precipitation level.
-  6. Bin all variables into 10-minute averages.
+  6. Bin all variables into 10-minute averages using pandas resample.
   7. Compute binned wind and wave directions from averaged vectors.
   8. Apply global range QC — out-of-range values become NaN.
 """
-
 import numpy as np
 import pandas as pd
 import gsw
@@ -119,8 +118,6 @@ def wind_direction(u: np.ndarray, v: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Wave direction processing
 # ---------------------------------------------------------------------------
-
-
 def rotate_wave_dir(
     mean_wave_dir: np.ndarray,
     alpha_deg: float,
@@ -187,8 +184,6 @@ def wave_direction_from_vectors(
 # ---------------------------------------------------------------------------
 # Oceanographic derived variables
 # ---------------------------------------------------------------------------
-
-
 def calc_salinity(
     conductivity: np.ndarray,
     temperature: np.ndarray,
@@ -239,8 +234,6 @@ def calc_rain_rate(precipitation_level: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # 10-minute binning
 # ---------------------------------------------------------------------------
-
-
 def make_bin_edges(
     bin_start: pd.Timestamp,
     bin_end: pd.Timestamp,
@@ -267,45 +260,6 @@ def make_bin_edges(
     )
 
 
-def bin_mean(
-    values: np.ndarray,
-    timestamps: pd.DatetimeIndex,
-    bin_edges: pd.DatetimeIndex,
-) -> np.ndarray:
-    """Bin *values* into intervals defined by *bin_edges* using the mean.
-
-    Each bin ``([edges[i], edges[i+1])`` receives the mean of all values
-    whose timestamps fall within it. Empty bins yield NaN.
-
-    Parameters
-    ----------
-    values : np.ndarray
-        1-D array of observations.
-    timestamps : pd.DatetimeIndex
-        Observation timestamps (UTC), same length as *values*.
-    bin_edges : pd.DatetimeIndex
-        Monotonically increasing bin boundaries (length = n_bins + 1).
-
-    Returns
-    -------
-    np.ndarray
-        Mean per bin, length ``len(bin_edges) - 1``.
-    """
-    n_bins = len(bin_edges) - 1
-    result = np.full(n_bins, np.nan)
-    ts = timestamps.view("int64")
-    edges = bin_edges.view("int64")
-
-    for i in range(n_bins):
-        mask = (ts >= edges[i]) & (ts < edges[i + 1])
-        if mask.any():
-            vals = values[mask]
-            finite = vals[np.isfinite(vals)]
-            if len(finite):
-                result[i] = finite.mean()
-    return result
-
-
 def bin_observations(
     metbk: pd.DataFrame,
     wavss: pd.DataFrame,
@@ -319,6 +273,12 @@ def bin_observations(
     wave directions are recovered from the averaged vector components
     *after* binning.
 
+    Binning is performed with ``DataFrame.resample`` anchored to
+    ``bin_edges[0]``, so bins align exactly with the state-derived
+    window boundaries.  METBK and WAVSS are resampled independently
+    (they have different sample rates and timestamps) then concatenated.
+    Empty bins yield NaN.
+
     Parameters
     ----------
     metbk : pd.DataFrame
@@ -327,6 +287,8 @@ def bin_observations(
         Raw WAVSS data from :func:`~ndbc_xml.ingest.load_wavss`.
     bin_edges : pd.DatetimeIndex
         Bin boundaries from :func:`make_bin_edges` (length n+1).
+        ``bin_edges[0]`` anchors the resample origin; ``bin_edges[:-1]``
+        are the bin labels used to reindex the result.
     alpha_deg : float
         Buoy heading correction angle in degrees.
 
@@ -345,12 +307,12 @@ def bin_observations(
     u, v = rotate_wind(
         metbk["eastward_wind_velocity"].values,
         metbk["northward_wind_velocity"].values,
-        alpha_deg
+        alpha_deg,
     )
     wspd = wind_speed(u, v)
     salinity = calc_salinity(
         metbk["sea_surface_conductivity"].values,
-        metbk["sea_surface_temperature"].values
+        metbk["sea_surface_temperature"].values,
     )
     rain = calc_rain_rate(metbk["precipitation_level"].values)
 
@@ -360,36 +322,45 @@ def bin_observations(
         alpha_deg,
     )
 
-    def _bin(arr, ts):
-        return bin_mean(arr, ts, bin_edges)
+    # --- Build indexed DataFrames for resample ---
+    rs_kw = dict(closed="left", label="left", origin=bin_edges[0])
+    bin_labels = bin_edges[:-1]
 
-    bin_centers = bin_edges[:-1] + pd.Timedelta(minutes=5)
+    metbk_proc = pd.DataFrame(
+        {
+            "wind_speed":   wspd,
+            "wind_dir_u":   u,
+            "wind_dir_v":   v,
+            "baro":         metbk["barometric_pressure"].values,
+            "air_temp":     metbk["air_temperature"].values,
+            "rel_humidity": metbk["relative_humidity"].values,
+            "shortwave":    metbk["shortwave_irradiance"].values,
+            "longwave":     metbk["longwave_irradiance"].values,
+            "sst":          metbk["sea_surface_temperature"].values,
+            "salinity":     salinity,
+            "rain_rate":    rain,
+        },
+        index=metbk_ts,
+    )
 
-    # METBK binning
-    u_bin = _bin(u, metbk_ts)
-    v_bin = _bin(v, metbk_ts)
+    wavss_proc = pd.DataFrame(
+        {
+            "sig_wave_hgt": wavss["significant_wave_height"].values,
+            "max_wave_hgt": wavss["maximum_wave_height"].values,
+            "peak_period":  wavss["peak_period"].values,
+            "avg_period":   wavss["average_wave_period"].values,
+            "wave_dir_u":   u_wave,
+            "wave_dir_v":   v_wave,
+        },
+        index=wavss_ts,
+    )
 
-    df = pd.DataFrame({
-        "time": bin_centers,
-        "wind_speed":   _bin(wspd, metbk_ts),
-        "wind_dir_u":   u_bin,
-        "wind_dir_v":   v_bin,
-        "baro":         _bin(metbk["barometric_pressure"].values, metbk_ts),
-        "air_temp":     _bin(metbk["air_temperature"].values, metbk_ts),
-        "rel_humidity": _bin(metbk["relative_humidity"].values, metbk_ts),
-        "shortwave":    _bin(metbk["shortwave_irradiance"].values, metbk_ts),
-        "longwave":     _bin(metbk["longwave_irradiance"].values, metbk_ts),
-        "sst":          _bin(metbk["sea_surface_temperature"].values, metbk_ts),
-        "salinity":     _bin(salinity, metbk_ts),
-        "rain_rate":    _bin(rain, metbk_ts),
-        # WAVSS binning
-        "sig_wave_hgt": _bin(wavss["significant_wave_height"].values, wavss_ts),
-        "max_wave_hgt": _bin(wavss["maximum_wave_height"].values, wavss_ts),
-        "peak_period":  _bin(wavss["peak_period"].values, wavss_ts),
-        "avg_period":   _bin(wavss["average_wave_period"].values, wavss_ts),
-        "wave_dir_u":   _bin(u_wave, wavss_ts),
-        "wave_dir_v":   _bin(v_wave, wavss_ts),
-    })
+    m_bin = metbk_proc.resample("10min", **rs_kw).mean().reindex(bin_labels)
+    w_bin = wavss_proc.resample("10min", **rs_kw).mean().reindex(bin_labels)
+
+    bin_centers = bin_labels + pd.Timedelta(minutes=5)
+    df = pd.concat([m_bin, w_bin], axis=1)
+    df.insert(0, "time", bin_centers)
 
     # Recover directions from averaged vectors
     df["wind_dir"] = wind_direction(
@@ -404,7 +375,7 @@ def bin_observations(
 
 
 # ---------------------------------------------------------------------------
-# QC
+# QC checks
 # ---------------------------------------------------------------------------
 def apply_qc(df: pd.DataFrame) -> pd.DataFrame:
     """Replace out-of-range values with NaN using global QC bounds.

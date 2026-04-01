@@ -12,7 +12,6 @@ Typical usage::
 
     from ndbc_xml.pipeline import run_station
 """
-
 from __future__ import annotations
 
 import logging
@@ -97,7 +96,7 @@ def run_station(config: StationConfig) -> Path | None:
     )
     log.info("%s: IGRF declination = %.3f", config.site, alpha_deg)
 
-    # --- 5. Bin edges, bin, QC ---
+    # --- 5. Bin, QC ---
     edges = make_bin_edges(bin_start, bin_end)
     binned = bin_observations(
         metbk=metbk,
