@@ -241,8 +241,8 @@ def ndbc(
 
     Returns
     -------
-    str or None
-        Path to the XML file written, or ``None`` if there was no new data.
+    list[Path] or None
+        Paths of the XML file(s) written, or ``None`` if there was no new data.
 
     Raises
     ------
@@ -342,7 +342,9 @@ def main(argv: list[str] | None = None) -> int:
         log.info("No new data to process — exiting.")
         return 2
 
-    log.info("XML written: %s", result)
+    log.info("XML written: %d file(s):", len(result))
+    for p in result:
+        log.info("  %s", p)
     return 0
 
 

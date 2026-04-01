@@ -262,3 +262,82 @@ def xml_filename(station_id: str) -> str:
     """
     now = pd.Timestamp.now("UTC")
     return now.strftime(f"%H-%d-%b-%Y-{station_id}.xml")
+
+
+def daily_xml_filename(station_id: str, date: pd.Timestamp, hour: int) -> str:
+    """Generate a date-stamped NDBC XML filename for daily archive files.
+
+    Format: ``HH-DD-Mon-YYYY-{station_id}.xml``
+    (e.g. ``23-01-Apr-2026-46097.xml``).
+
+    Past days use hour ``23``; the current UTC day uses the actual run hour.
+
+    Parameters
+    ----------
+    station_id : str
+        NDBC station identifier.
+    date : pd.Timestamp
+        UTC calendar date of the observations in the file.
+    hour : int
+        Hour to embed in the filename (0–23).
+
+    Returns
+    -------
+    str
+        Filename string.
+    """
+    return date.strftime(f"{hour:02d}-%d-%b-%Y-{station_id}.xml")
+
+
+def write_xml_daily(
+    df: pd.DataFrame,
+    station_id: str,
+    output_dir: Path,
+) -> list[Path]:
+    """Write one NDBC XML file per UTC calendar day.
+
+    Used when reprocessing or running for the first time, where *df*
+    may span many days. Each output file contains only the observations
+    for that UTC day and is named with :func:`daily_xml_filename`.
+
+    Past days get hour ``23`` in their filename; the current UTC day gets
+    the actual UTC hour of the run.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        QC'd, binned observations (same schema as :func:`write_xml`).
+    station_id : str
+        NDBC station identifier written into each ``<station>`` tag.
+    output_dir : Path
+        Directory where daily files are written. Created if absent.
+
+    Returns
+    -------
+    list[Path]
+        Paths of all files written, one per UTC calendar day.
+
+    Raises
+    ------
+    ValueError
+        If *df* is empty.
+    """
+    if df.empty:
+        raise ValueError("Cannot write XML from empty DataFrame.")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+
+    now = pd.Timestamp.now("UTC")
+    today = now.normalize()
+    run_hour = now.hour
+
+    for date, day_df in df.groupby(df["time"].dt.normalize()):
+        hour = run_hour if date == today else 23
+        out_path = output_dir / daily_xml_filename(station_id, date, hour)
+        write_xml(day_df.reset_index(drop=True), station_id=station_id,
+                  output_path=out_path)
+        written.append(out_path)
+
+    log.info("Wrote %d daily XML file(s) to %s", len(written), output_dir)
+    return written
