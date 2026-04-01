@@ -25,10 +25,10 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 # Path configuration — adjust these for the deployment environment
 # -----------------------------------------------------------------------------
-# Full path to the Python interpreter in the ooi conda environment.
+# Full path to the Python interpreter in the ndbc-xml conda environment.
 # Using the explicit path avoids relying on conda activation in non-interactive
 # (cron) shells, where PATH is minimal and 'conda activate' is unavailable.
-PYTHON=/home/ooiuser/miniforge3/envs/ooi/bin/python
+PYTHON=/home/ooiuser/miniforge3/envs/ndbc-xml/bin/python
 
 # Root of the ndbc-xml package (directory containing ndbc_xml/).
 PACKAGE_DIR=/home/ooiuser/code/ndbc-xml

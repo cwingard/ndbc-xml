@@ -59,10 +59,12 @@ def get_declination(
     Examples
     --------
     >>> from datetime import datetime
-    >>> get_declination(44.639, -124.095, datetime(2026, 1, 1))
+    >>> get_declination(44.639, -124.304, datetime(2026, 1, 1))
     14.602...
     """
-    be, bn, _ = ppigrf.igrf(longitude, latitude, altitude_km, date)  # type: ignore[arg-type]
+    # ppigrf requires a timezone-naive datetime; strip tzinfo if present.
+    naive_date = date.replace(tzinfo=None) if hasattr(date, "tzinfo") and date.tzinfo is not None else date
+    be, bn, _ = ppigrf.igrf(longitude, latitude, altitude_km, naive_date)  # type: ignore[arg-type]
     # arctan2(east, north) gives the signed angle of the magnetic
     # field vector from geographic north — i.e. the declination.
     return float(np.degrees(np.arctan2(be.squeeze(), bn.squeeze())))
