@@ -109,7 +109,8 @@ def run_station(config: StationConfig) -> list[Path] | None:
         metbk=metbk,
         wavss=wavss,
         bin_edges=edges,
-        alpha_deg=alpha_deg
+        alpha_deg=alpha_deg,
+        sensor_depth_m=config.sensor_depth_m,
     )
     qc_data = apply_qc(binned)
 

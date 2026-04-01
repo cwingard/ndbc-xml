@@ -187,6 +187,7 @@ def wave_direction_from_vectors(
 def calc_salinity(
     conductivity: np.ndarray,
     temperature: np.ndarray,
+    pressure_dbar: float = 1.25,
 ) -> np.ndarray:
     """Compute practical salinity from conductivity using GSW.
 
@@ -196,6 +197,9 @@ def calc_salinity(
         Sea surface conductivity in S/m (OOI native units).
     temperature : np.ndarray
         Sea surface temperature in °C.
+    pressure_dbar : float
+        Sea pressure in dbar. Default 1.25 (sensor depth in metres,
+        approximately equal to dbar near the surface).
 
     Returns
     -------
@@ -203,7 +207,7 @@ def calc_salinity(
         Practical salinity (PSU).
     """
     # OOI conductivity is in S/m; gsw_SP_from_C expects mS/cm
-    return gsw.SP_from_C(conductivity * 10, temperature, 1.0)
+    return gsw.SP_from_C(conductivity * 10, temperature, pressure_dbar)
 
 
 def calc_rain_rate(precipitation_level: np.ndarray) -> np.ndarray:
@@ -264,7 +268,8 @@ def bin_observations(
     metbk: pd.DataFrame,
     wavss: pd.DataFrame,
     bin_edges: pd.DatetimeIndex,
-    alpha_deg: float
+    alpha_deg: float,
+    sensor_depth_m: float = 1.25,
 ) -> pd.DataFrame:
     """Bin and process METBK and WAVSS data into 10-minute averages.
 
@@ -291,6 +296,9 @@ def bin_observations(
         are the bin labels used to reindex the result.
     alpha_deg : float
         Buoy heading correction angle in degrees.
+    sensor_depth_m : float
+        CTD sensor depth in metres, used as the pressure argument
+        (dbar ≈ m near the surface) for GSW salinity. Default 1.25.
 
     Returns
     -------
@@ -315,6 +323,7 @@ def bin_observations(
     salinity = calc_salinity(
         metbk["sea_surface_conductivity"].values,
         metbk["sea_surface_temperature"].values,
+        pressure_dbar=sensor_depth_m,
     )
     rain = calc_rain_rate(metbk["precipitation_level"].values)
 

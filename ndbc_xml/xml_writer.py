@@ -50,7 +50,7 @@ def _fmt(value: float) -> str:
     """
     if np.isfinite(value):
         return _FLOAT_FMT.format(value)
-    return str(MISSING)
+    return _FLOAT_FMT.format(float(MISSING))
 
 
 def _tag(name: str, value: float) -> str:
@@ -126,7 +126,7 @@ def build_message(
     str
         Complete ``<message>...</message>`` block as a string.
     """
-    date_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    date_str = timestamp.strftime("%m/%d/%Y %H:%M:%S")
     lines = [
         "<message>",
         f"<station>{station_id}</station>",

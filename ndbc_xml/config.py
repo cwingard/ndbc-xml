@@ -38,7 +38,7 @@ class StationConfig:
         across runs. Created automatically on first run.
     sensor_depth_m : float
         Nominal depth of the CTD/temperature sensor in meters
-        (positive down). Used for pressure calculation. Default 1.5 m.
+        (positive down). Used for pressure calculation. Default 1.25 m.
     """
     site: str
     ndbc_id: str
@@ -48,7 +48,7 @@ class StationConfig:
     wavss_dir: Path
     xml_out_dir: Path
     state_file: Path
-    sensor_depth_m: float = 1.5
+    sensor_depth_m: float = 1.25
 
 # ---------------------------------------------------------------------------
 # QC range bounds — (min_valid, max_valid); values outside → NaN → -9999
