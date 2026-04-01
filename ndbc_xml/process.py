@@ -296,11 +296,13 @@ def bin_observations(
     -------
     pd.DataFrame
         One row per bin (``len(bin_edges) - 1`` rows).  The ``time``
-        column holds the bin-center timestamp (UTC).  All other columns
+        column holds the bin left-edge timestamp (UTC).  All other columns
         are the processed, binned variable names used downstream by
         :func:`~ndbc_xml.process.apply_qc` and the XML writer.
     """
-    metbk_ts = epoch_to_datetime(metbk["time"].values)
+    # Shift METBK timestamps forward by 5 min so that the bin left-edge
+    # label lands at the center of the data collection window.
+    metbk_ts = epoch_to_datetime(metbk["time"].values) + pd.Timedelta(minutes=5)
     wavss_ts = epoch_to_datetime(wavss["time"].values)
 
     # --- derived METBK arrays (pre-binning) ---
@@ -358,9 +360,8 @@ def bin_observations(
     m_bin = metbk_proc.resample("10min", **rs_kw).mean().reindex(bin_labels)
     w_bin = wavss_proc.resample("10min", **rs_kw).mean().reindex(bin_labels)
 
-    bin_centers = bin_labels + pd.Timedelta(minutes=5)
     df = pd.concat([m_bin, w_bin], axis=1)
-    df.insert(0, "time", bin_centers)
+    df.insert(0, "time", bin_labels)
 
     # Recover directions from averaged vectors
     df["wind_dir"] = wind_direction(
