@@ -187,7 +187,7 @@ def wave_direction_from_vectors(
 def calc_salinity(
     conductivity: np.ndarray,
     temperature: np.ndarray,
-    pressure_dbar: float = 1.25,
+    pressure_dbar: float = 1.15,
 ) -> np.ndarray:
     """Compute practical salinity from conductivity using GSW.
 
@@ -198,7 +198,7 @@ def calc_salinity(
     temperature : np.ndarray
         Sea surface temperature in °C.
     pressure_dbar : float
-        Sea pressure in dbar. Default 1.25 (sensor depth in metres,
+        Sea pressure in dbar. Default 1.15 (sensor depth in metres,
         approximately equal to dbar near the surface).
 
     Returns
@@ -269,7 +269,7 @@ def bin_observations(
     wavss: pd.DataFrame,
     bin_edges: pd.DatetimeIndex,
     alpha_deg: float,
-    pressure_dbar: float = 1.25,
+    pressure_dbar: float = 1.15,
 ) -> pd.DataFrame:
     """Bin and process METBK and WAVSS data into 10-minute averages.
 
@@ -298,7 +298,7 @@ def bin_observations(
         Buoy heading correction angle in degrees.
     pressure_dbar : float
         Sea pressure in dbar for GSW salinity calculation. Computed from
-        sensor depth via ``gsw.p_from_z`` in the pipeline. Default 1.25.
+        sensor depth via ``gsw.p_from_z`` in the pipeline. Default 1.15.
 
     Returns
     -------

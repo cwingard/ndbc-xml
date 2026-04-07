@@ -36,6 +36,12 @@ PACKAGE_DIR=/home/ooiuser/code/ndbc-xml
 # Directory for pipeline log files (one per site).
 LOG_DIR=/home/ooiuser/logs/ndbc-xml
 
+# SFTP configuration for NDBC file delivery.
+SFTP_KEY=/home/ooiuser/.ssh/ndbc
+SFTP_USER=ooi.osu_sftp
+SFTP_HOST=comms.ndbc.noaa.gov
+SFTP_REMOTE_DIR=uploads
+
 # -----------------------------------------------------------------------------
 # Argument handling
 # -----------------------------------------------------------------------------
@@ -50,9 +56,26 @@ shift 2
 EXTRA_ARGS=("$@")
 
 # -----------------------------------------------------------------------------
+# Site metadata
+# -----------------------------------------------------------------------------
+case "${SITE}" in
+    CE02) NDBC_ID=46097 ;;
+    CE04) NDBC_ID=46098 ;;
+    CE07) NDBC_ID=46099 ;;
+    CE09) NDBC_ID=46100 ;;
+    *)
+        echo "Unknown site: ${SITE}" >&2
+        exit 1
+        ;;
+esac
+
+# XML output directory — matches the pipeline's default (no --xml-out needed).
+XML_OUT_DIR="${DEPLOYMENT_DIR}/buoy/metbk/xml"
+
+# -----------------------------------------------------------------------------
 # Environment setup
 # -----------------------------------------------------------------------------
-# Ensure the log directory exists.
+# Ensure the log directory exists (the pipeline creates XML_OUT_DIR itself).
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${SITE}.log"
 
@@ -63,8 +86,49 @@ export PYTHONPATH="${PACKAGE_DIR}:${PYTHONPATH:-}"
 # -----------------------------------------------------------------------------
 # Run the pipeline
 # -----------------------------------------------------------------------------
-exec "${PYTHON}" -m ndbc_xml.ndbc \
+# Check now (before shifting args) whether this is a reprocess run so we can
+# skip SFTP after the pipeline finishes.
+REPROCESS=0
+for arg in "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"; do
+    [[ "${arg}" == "--reprocess" ]] && REPROCESS=1 && break
+done
+
+# Touch a temp file immediately before the pipeline runs so we can identify
+# which XML files were written during this run (handles both normal and
+# --reprocess cases, where multiple files may be written).
+RUN_MARKER=$(mktemp)
+trap 'rm -f "${RUN_MARKER}"' EXIT
+
+EXIT_CODE=0
+"${PYTHON}" -m ndbc_xml.ndbc \
     "${SITE}" \
     "${DEPLOYMENT_DIR}" \
     --log-file "${LOG_FILE}" \
-    "${EXTRA_ARGS[@]}"
+    "${EXTRA_ARGS[@]}" || EXIT_CODE=$?
+
+# -----------------------------------------------------------------------------
+# SFTP transfer — only when the pipeline wrote new XML (exit 0) and this is
+# not a reprocess run (NDBC may not accept back-filled files).
+# -----------------------------------------------------------------------------
+if [[ ${EXIT_CODE} -eq 0 && ${REPROCESS} -eq 0 ]]; then
+    # Collect all XML files for this station written during this run.
+    WRITTEN=()
+    while IFS= read -r -d '' f; do
+        WRITTEN+=("$f")
+    done < <(find "${XML_OUT_DIR}" -name "*-${NDBC_ID}.xml" -newer "${RUN_MARKER}" -print0)
+
+    if [[ ${#WRITTEN[@]} -eq 0 ]]; then
+        echo "Warning: pipeline succeeded but no new XML files found in ${XML_OUT_DIR}" >&2
+    else
+        for XML_FILE in "${WRITTEN[@]}"; do
+            FILENAME=$(basename "${XML_FILE}")
+            sftp -i "${SFTP_KEY}" "${SFTP_USER}@${SFTP_HOST}" <<EOF
+cd ${SFTP_REMOTE_DIR}
+put ${XML_FILE} ${FILENAME}
+bye
+EOF
+        done
+    fi
+fi
+
+exit ${EXIT_CODE}

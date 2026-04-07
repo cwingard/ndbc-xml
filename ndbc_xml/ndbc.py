@@ -42,7 +42,7 @@ Optional arguments
 --sensor-depth METERS
     Depth of the CTD/temperature sensor below the surface in
     meters (positive down). Used for GSW pressure calculation.
-    Default: 1.25.
+    Default: 1.15.
 --reprocess
     Delete the state file and reprocess all available data from
     scratch. Use after a bug fix or data correction when the
