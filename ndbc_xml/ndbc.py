@@ -42,7 +42,7 @@ Optional arguments
 --sensor-depth METERS
     Depth of the CTD/temperature sensor below the surface in
     meters (positive down). Used for GSW pressure calculation.
-    Default: 1.15.
+    Defaults to the value in StationConfig (currently 1.15 m).
 --reprocess
     Delete the state file and reprocess all available data from
     scratch. Use after a bug fix or data correction when the
@@ -135,7 +135,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--sensor-depth",
         type=float,
-        default=1.5,
+        default=None,
         metavar="meters",
         help="CTD/temperature sensor depth below surface (m, positive down).",
     )
@@ -204,7 +204,7 @@ def _build_config(args: argparse.Namespace) -> StationConfig:
     meta = SITES[site]
     deploy = Path(args.deployment_dir)
 
-    return StationConfig(
+    kwargs: dict = dict(
         site=site,
         ndbc_id=meta["ndbc_id"],
         latitude=meta["latitude"],
@@ -217,8 +217,10 @@ def _build_config(args: argparse.Namespace) -> StationConfig:
             if args.state_file
             else deploy / "buoy" / "metbk" / "xml" / f"{site}_position.json"
         ),
-        sensor_depth_m=args.sensor_depth,
     )
+    if args.sensor_depth is not None:
+        kwargs["sensor_depth_m"] = args.sensor_depth
+    return StationConfig(**kwargs)
 
 
 def ndbc(

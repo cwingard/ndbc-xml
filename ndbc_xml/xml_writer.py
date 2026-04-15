@@ -31,7 +31,6 @@ _FM64_TAGS = (
     "<fm64xx>99</fm64xx>",
     "<fm64k1>7</fm64k1>",
     "<fm64k2>1</fm64k2>",
-    "<dp001>1.15</dp001>",
 )
 
 
@@ -50,7 +49,7 @@ def _fmt(value: float) -> str:
     """
     if np.isfinite(value):
         return _FLOAT_FMT.format(value)
-    return _FLOAT_FMT.format(float(MISSING))
+    return str(MISSING)
 
 
 def _tag(name: str, value: float) -> str:
@@ -86,6 +85,7 @@ def build_message(
     wave_dir: float,
     sst: float,
     salinity: float,
+    sensor_depth_m: float,
 ) -> str:
     """Build a single NDBC XML ``<message>`` block.
 
@@ -94,8 +94,7 @@ def build_message(
     station_id : str
         NDBC station identifier (e.g. ``'46097'``).
     timestamp : pd.Timestamp
-        Observation time (UTC), formatted as
-        ``YYYY-MM-DD HH:MM:SS``.
+        Observation time (UTC), formatted as ``MM/DD/YYYY HH:MM:SS``.
     wind_dir : float
         Wind direction, degrees true (``<wdir1>``).
     wind_speed : float
@@ -120,6 +119,8 @@ def build_message(
         Sea surface temperature, °C (``<tp001>``, ``<wtmp1>``).
     salinity : float
         Sea surface practical salinity, PSU (``<sp001>``).
+    sensor_depth_m : float
+        CTD sensor depth in meters (``<dp001>``).
 
     Returns
     -------
@@ -146,6 +147,7 @@ def build_message(
         _tag("mwdir",  wave_dir),
         _tag("tp001",  sst),
         *_FM64_TAGS,
+        f"<dp001>{sensor_depth_m}</dp001>",
         _tag("wtmp1",  sst),
         _tag("sp001",  salinity),
         "</met>",
@@ -177,6 +179,7 @@ def write_xml(
     df: pd.DataFrame,
     station_id: str,
     output_path: Path,
+    sensor_depth_m: float,
 ) -> Path:
     """Write a complete NDBC XML submission file.
 
@@ -197,6 +200,8 @@ def write_xml(
         NDBC station identifier written into each ``<station>`` tag.
     output_path : Path
         Destination file path. Parent directory must exist.
+    sensor_depth_m : float
+        CTD sensor depth in meters, written into each ``<dp001>`` tag.
 
     Returns
     -------
@@ -237,6 +242,7 @@ def write_xml(
                     wave_dir=row["wave_dir"],
                     sst=row["sst"],
                     salinity=row["salinity"],
+                    sensor_depth_m=sensor_depth_m,
                 )
             )
 
@@ -293,6 +299,7 @@ def write_xml_daily(
     df: pd.DataFrame,
     station_id: str,
     output_dir: Path,
+    sensor_depth_m: float,
 ) -> list[Path]:
     """Write one NDBC XML file per UTC calendar day.
 
@@ -311,6 +318,8 @@ def write_xml_daily(
         NDBC station identifier written into each ``<station>`` tag.
     output_dir : Path
         Directory where daily files are written. Created if absent.
+    sensor_depth_m : float
+        CTD sensor depth in meters, written into each ``<dp001>`` tag.
 
     Returns
     -------
@@ -336,7 +345,7 @@ def write_xml_daily(
         hour = run_hour if date == today else 23
         out_path = output_dir / daily_xml_filename(station_id, date, hour)
         write_xml(day_df.reset_index(drop=True), station_id=station_id,
-                  output_path=out_path)
+                  output_path=out_path, sensor_depth_m=sensor_depth_m)
         written.append(out_path)
 
     log.info("Wrote %d daily XML file(s) to %s", len(written), output_dir)

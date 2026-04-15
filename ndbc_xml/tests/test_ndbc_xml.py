@@ -159,16 +159,19 @@ class TestBinObservations:
         return int(pd.Timestamp(f"2026-01-01 {hhmm}", tz="UTC").timestamp())
 
     def test_output_shape(self):
+        # Samples at :00/:10/:20; after +5 min shift → :05/:15/:25, one per bin.
         edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=30))
-        times_s = [self._ts("00:05"), self._ts("00:15"), self._ts("00:25")]
+        times_s = [self._ts("00:00"), self._ts("00:10"), self._ts("00:20")]
         df = bin_observations(self._metbk(times_s), self._wavss(times_s),
                               edges, alpha_deg=0.0)
         assert len(df) == 3
 
     def test_empty_bin_is_nan(self):
         edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=30))
-        # Skip the middle bin (00:10–00:20)
-        times_s = [self._ts("00:05"), self._ts("00:25")]
+        # Samples at :00 and :20; after the +5 min METBK shift they land at
+        # :05 and :25, falling in bins [00:00, 00:10) and [00:20, 00:30).
+        # The middle bin [00:10, 00:20) is empty → NaN.
+        times_s = [self._ts("00:00"), self._ts("00:20")]
         df = bin_observations(self._metbk(times_s), self._wavss(times_s),
                               edges, alpha_deg=0.0)
         assert len(df) == 3
@@ -176,9 +179,9 @@ class TestBinObservations:
 
     def test_nan_excluded_from_mean(self):
         edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=10))
-        times_s = [self._ts("00:02"), self._ts("00:07")]
-        # Two observations in the same bin; second has u=4, v=3 → speed=5
-        # first has u=nan; resample mean should ignore it
+        # Samples at :00 and :04; after +5 min shift → :05 and :09, both in
+        # bin [00:00, 00:10). First sample has NaN wind; mean should ignore it.
+        times_s = [self._ts("00:00"), self._ts("00:04")]
         metbk = self._metbk(times_s)
         metbk.loc[0, "eastward_wind_velocity"] = np.nan
         metbk.loc[0, "northward_wind_velocity"] = np.nan
@@ -187,21 +190,25 @@ class TestBinObservations:
         np.testing.assert_allclose(df["wind_speed"].iloc[0], 5.0)
 
     def test_wind_speed_correct(self):
-        """u=3, v=4, alpha=0 → speed=5.0."""
+        """u=3, v=4, alpha=0 → speed=5.0.
+
+        Sample at :00; after +5 min METBK shift → :05, inside bin [00:00, 00:10).
+        """
         edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=10))
-        times_s = [self._ts("00:05")]
+        times_s = [self._ts("00:00")]
         df = bin_observations(self._metbk(times_s), self._wavss(times_s),
                               edges, alpha_deg=0.0)
         np.testing.assert_allclose(df["wind_speed"].iloc[0], 5.0)
 
-    def test_bin_center_timestamps(self):
-        """time column holds bin-center (+5 min) timestamps."""
+    def test_bin_left_edge_timestamps(self):
+        """time column holds bin left-edge timestamps (00:00, 00:10, …)."""
         edges = make_bin_edges(self._t0, self._t0 + pd.Timedelta(minutes=20))
-        times_s = [self._ts("00:05")]
+        # Sample at :00; after +5 min shift → :05, in first bin.
+        times_s = [self._ts("00:00")]
         df = bin_observations(self._metbk(times_s), self._wavss(times_s),
                               edges, alpha_deg=0.0)
-        assert df["time"].iloc[0] == pd.Timestamp("2026-01-01 00:05", tz="UTC")
-        assert df["time"].iloc[1] == pd.Timestamp("2026-01-01 00:15", tz="UTC")
+        assert df["time"].iloc[0] == pd.Timestamp("2026-01-01 00:00", tz="UTC")
+        assert df["time"].iloc[1] == pd.Timestamp("2026-01-01 00:10", tz="UTC")
 
 
 class TestApplyQC:
@@ -274,11 +281,13 @@ class TestBuildMessage:
             air_temp=12.0, rel_humidity=80.0, shortwave=200.0,
             longwave=350.0, sig_wave_hgt=1.2, peak_period=9.0,
             wave_dir=280.0, sst=11.5, salinity=32.8,
+            sensor_depth_m=1.15,
         )
         assert "<station>46097</station>" in msg
-        assert "<date>2026-03-30 12:00:00</date>" in msg
+        assert "<date>03/30/2026 12:00:00</date>" in msg
         assert "<wdir1>270.000000</wdir1>" in msg
         assert "<fm64iii>830</fm64iii>" in msg
+        assert "<dp001>1.15</dp001>" in msg
         assert msg.startswith("<message>")
         assert msg.endswith("</message>")
 
@@ -290,6 +299,7 @@ class TestBuildMessage:
             air_temp=12.0, rel_humidity=80.0, shortwave=200.0,
             longwave=350.0, sig_wave_hgt=1.2, peak_period=9.0,
             wave_dir=280.0, sst=11.5, salinity=32.8,
+            sensor_depth_m=1.15,
         )
         assert "<wdir1>-9999</wdir1>" in msg
 
@@ -316,31 +326,31 @@ class TestWriteXml:
 
     def test_writes_file(self, tmp_path):
         df = self._sample_df()
-        out = write_xml(df, "46097", tmp_path / "test.xml")
+        out = write_xml(df, "46097", tmp_path / "test.xml", sensor_depth_m=1.15)
         assert out.exists()
 
     def test_header_line(self, tmp_path):
         df = self._sample_df()
-        out = write_xml(df, "46097", tmp_path / "test.xml")
+        out = write_xml(df, "46097", tmp_path / "test.xml", sensor_depth_m=1.15)
         first_line = out.read_text(encoding="ISO-8859-1").splitlines()[0]
         assert first_line.startswith("SXML99 KWBC ")
 
     def test_xml_declaration(self, tmp_path):
         df = self._sample_df()
-        out = write_xml(df, "46097", tmp_path / "test.xml")
+        out = write_xml(df, "46097", tmp_path / "test.xml", sensor_depth_m=1.15)
         content = out.read_text(encoding="ISO-8859-1")
         assert '<?xml version="1.0" encoding="ISO-8859-1"?>' in content
 
     def test_message_count(self, tmp_path):
         df = self._sample_df()
-        out = write_xml(df, "46097", tmp_path / "test.xml")
+        out = write_xml(df, "46097", tmp_path / "test.xml", sensor_depth_m=1.15)
         content = out.read_text(encoding="ISO-8859-1")
         assert content.count("<message>") == 3
 
     def test_empty_df_raises(self, tmp_path):
         df = self._sample_df().iloc[0:0]
         with pytest.raises(ValueError):
-            write_xml(df, "46097", tmp_path / "empty.xml")
+            write_xml(df, "46097", tmp_path / "empty.xml", sensor_depth_m=1.15)
 
     def test_xml_filename_format(self):
         name = xml_filename("46097")

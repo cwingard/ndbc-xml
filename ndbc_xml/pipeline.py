@@ -123,7 +123,7 @@ def run_station(config: StationConfig) -> list[Path] | None:
         log.warning("%s: QC produced an empty DataFrame — skipping.", config.site)
         return None
 
-    # --- 5. Write XML ---
+    # --- 6. Write XML ---
     # Multi-day spans (reprocess / first run) → one file per UTC day.
     # Short incremental spans → single timestamped file.
     if (bin_end - bin_start) > _DAILY_SPLIT_THRESHOLD:
@@ -131,14 +131,16 @@ def run_station(config: StationConfig) -> list[Path] | None:
             qc_data,
             station_id=config.ndbc_id,
             output_dir=config.xml_out_dir,
+            sensor_depth_m=config.sensor_depth_m,
         )
     else:
         fname = xml_filename(config.ndbc_id)
         out_path = config.xml_out_dir / fname
         written = [write_xml(qc_data, station_id=config.ndbc_id,
-                             output_path=out_path)]
+                             output_path=out_path,
+                             sensor_depth_m=config.sensor_depth_m)]
 
-    # --- 6. Persist state ---
+    # --- 7. Persist state ---
     save_state(config.state_file, last_bin_end=bin_end, station=config.site)
 
     return written
