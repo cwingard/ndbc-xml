@@ -3,12 +3,12 @@
 Converts OOI surface mooring buoy data (JSON) into NDBC XML submission files.
 Runs hourly via cron for the four OOI Endurance Array Coastal Surface Moorings.
 
-| OOI Site | NDBC ID | Location                                  |
-|----------|---------|-------------------------------------------|
-| CE02 | 46097 | Oregon Shelf (44.639°N, 124.095°W)        |
-| CE04 | 46098 | Oregon Offshore (44.369°N, 124.954°W)     |
-| CE07 | 46099 | Washington Shelf (44.369°N, 124.555°W)    |
-| CE09 | 46100 | Washington Offshore (46.859°N, 124.973°W) |
+| OOI Site | NDBC ID | Location                                   |
+|----------|---------|--------------------------------------------|
+| CE02     | 46097   | Oregon Shelf (44.639°N, 124.304°W)         |
+| CE04     | 46098   | Oregon Offshore (44.381°N, 124.956°W)      |
+| CE07     | 46099   | Washington Shelf (46.986°N, 124.566°W)     |
+| CE09     | 46100   | Washington Offshore (46.851°N, 124.972°W)  |
 
 ## Requirements
 
@@ -22,7 +22,7 @@ Key dependencies: `pandas`, `numpy`, `gsw` (Gibbs SeaWater), `ppigrf` (IGRF-14).
 ```bash
 conda env create -f environment.yml
 conda activate ooi
-pip install -e .
+conda develop .
 ```
 
 ## Usage
@@ -47,7 +47,7 @@ python -m ndbc_xml.ndbc <SITE> <DEPLOYMENT_DIR> [options]
 | `--xml-out DIR` | `<DEPLOYMENT_DIR>/buoy/metbk/xml` | Output directory for XML files |
 | `--state-file PATH` | `<xml-out>/<SITE>_position.json` | State file for incremental processing |
 | `--alpha-date YYYY-MM-DD` | mid-point of processing window | Override date for IGRF declination calculation |
-| `--sensor-depth METERS` | `1.5` | CTD sensor depth below surface (m, positive down) |
+| `--sensor-depth METERS` | `1.15` | CTD sensor depth below surface (m, positive down) |
 | `--reprocess` | off | Delete state file and reprocess all data from scratch |
 | `--log-level LEVEL` | `INFO` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `--log-file PATH` | stderr only | Append log output to this file |
@@ -104,6 +104,7 @@ OOI JSON files
 ## Output format
 
 Files are named `HH-DD-Mon-YYYY-<NDBC_ID>.xml` (e.g. `14-30-Mar-2026-46097.xml`).
+Spans longer than one day (reprocess or first run) produce one file per UTC calendar day.
 
 Each file begins with a WMO bulletin header required by NDBC:
 ```
@@ -111,7 +112,7 @@ SXML99 KWBC DDHHMM
 <?xml version="1.0" encoding="ISO-8859-1"?>
 <message>
   <station>46097</station>
-  <date>2026-03-30 14:00:00</date>
+  <date>03/30/2026 14:00:00</date>
   ...
 </message>
 ```
@@ -133,5 +134,8 @@ Missing or QC-failed values are written as `-9999`.
 pytest ndbc_xml/tests/test_ndbc_xml.py -v
 
 # Run a single test class
-pytest ndbc_xml/tests/test_ndbc_xml.py::TestBinMean -v
+pytest ndbc_xml/tests/test_ndbc_xml.py::TestBinObservations -v
+
+# Run a single test
+pytest ndbc_xml/tests/test_ndbc_xml.py::TestBinObservations::test_wind_speed_correct -v
 ```
